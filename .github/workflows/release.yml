@@ -1,0 +1,59 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'              # e.g. v0.3.0
+  workflow_dispatch:       # allow manual runs
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # needed to create/upload a Release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Pull version from the tag, strip the leading 'v', and export to env
+      - name: Set VERSION from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" | tee -a "$GITHUB_ENV"
+          echo "$VERSION" > VERSION
+          echo "Release tag: ${GITHUB_REF_NAME}"
+          echo "Version (no v): ${VERSION}"
+
+      - name: Package
+        run: |
+          bash scripts/release/package.sh
+          echo "Artifacts:"
+          ls -la dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}       # e.g. v0.3.0
+          draft: false
+          prerelease: false
+          files: |
+            dist/fortify-${{ env.VERSION }}.tar.gz
+            dist/fortify-${{ env.VERSION }}.zip
+            dist/SHA256SUMS.txt
+          body: |
+            ## Fortify ${{ github.ref_name }}
+            Linux-based security hardening tool that protects you and your machine from hackers.
+            Gamified reports with scores, badges, and Octocat approval.
+
+            ### Install
+            ```bash
+            curl -fsSL https://github.com/megane18/Fortify/releases/download/${{ github.ref_name }}/fortify-${{ env.VERSION }}.tar.gz \
+            | tar xz && sudo bash fortify-${{ env.VERSION }}/install.sh
+            ```
+
+            ### Verify checksum (optional)
+            ```bash
+            curl -fsSL https://github.com/megane18/Fortify/releases/download/${{ github.ref_name }}/SHA256SUMS.txt -o SHA256SUMS.txt
+            sha256sum --check SHA256SUMS.txt
+            # or: shasum -a 256 --check SHA256SUMS.txt
+            ```
