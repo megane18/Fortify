@@ -44,11 +44,11 @@ HTML reports auto-open in your browser if available.
 - 🐙 Octocat Approval (special)
 
 ## 📦 Installation
-# Optional: make it global
+-- Optional: make it global
 sudo cp scripts/fortify.sh /usr/local/bin/fortify
 sudo chmod +x /usr/local/bin/fortify
 
-# Now you can run it anywhere
+-- Now you can run it anywhere
 fortify
 
 
