@@ -1,71 +1,66 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# repo root
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "$ROOT"
+# Build a portable tarball:
+#  - bundles scripts/{fortify.sh,bin/fortify,checks,lib,profiles,gamified_reports.sh}
+#  - adds install.sh
+#  - writes VERSION.txt into the root of the archive for reference
 
-VERSION="$(cat VERSION)"
-NAME="fortify-${VERSION}"
-DIST="$ROOT/dist"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REL_DIR="$ROOT_DIR/scripts/release"
 
-# clean
-rm -rf "$DIST"
-mkdir -p "$DIST/$NAME"
+# Version resolution
+VERSION_FILE="$REL_DIR/VERSION"
+if [[ -f "$VERSION_FILE" ]]; then
+  VERSION="$(tr -d ' \t\r\n' < "$VERSION_FILE")"
+else
+  # fallback to latest Git tag (like v0.3.0) or "0.0.0"
+  VERSION="$(git -C "$ROOT_DIR" describe --tags --abbrev=0 2>/dev/null || echo v0.0.0)"
+  VERSION="${VERSION#v}"
+fi
 
-# payload
-cp -R scripts "$DIST/$NAME/scripts"
-cp -R tests   "$DIST/$NAME/tests"
-cp README.md LICENSE VERSION "$DIST/$NAME/"
+APPNAME="fortify"
+PKGROOT="$ROOT_DIR/dist"
+STAGE="$PKGROOT/${APPNAME}-${VERSION}"
 
-# lightweight installer (keeps structure under /usr/local/fortify)
-cat > "$DIST/$NAME/install.sh" <<'EOS'
-#!/usr/bin/env bash
-set -euo pipefail
+# Clean stage
+rm -rf "$STAGE" "$PKGROOT"/*.tar.gz
+mkdir -p "$STAGE/scripts/bin"
+mkdir -p "$STAGE/scripts/checks"
+mkdir -p "$STAGE/scripts/lib"
+mkdir -p "$STAGE/scripts/profiles"
 
-PREFIX="${PREFIX:-/usr/local}"
-DEST="${DEST:-/usr/local/fortify}"
+# Copy core files
+cp -a "$ROOT_DIR/scripts/fortify.sh"            "$STAGE/scripts/fortify.sh"
+cp -a "$ROOT_DIR/scripts/bin/fortify"           "$STAGE/scripts/bin/fortify"
+cp -a "$ROOT_DIR/scripts/gamified_reports.sh"   "$STAGE/scripts/gamified_reports.sh"
 
-echo "[*] Installing Fortify into: $DEST"
-mkdir -p "$DEST"
-cp -R scripts tests README.md LICENSE VERSION "$DEST/"
+# Copy checks/lib/profiles (these are REQUIRED at runtime)
+cp -a "$ROOT_DIR/scripts/checks/"*.sh           "$STAGE/scripts/checks/"  2>/dev/null || true
+cp -a "$ROOT_DIR/scripts/lib/"*.sh              "$STAGE/scripts/lib/"     2>/dev/null || true
+cp -a "$ROOT_DIR/scripts/profiles/"*.profile    "$STAGE/scripts/profiles/"
 
-# permissions
-chmod +x "$DEST/scripts/fortify.sh" || true
-chmod +x "$DEST/scripts/gamified_reports.sh" || true
-find "$DEST/scripts/checks" -type f -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
-find "$DEST/tests" -type f -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
+# Copy installer
+cp -a "$REL_DIR/install.sh"                     "$STAGE/install.sh"
 
-# link entrypoint
-mkdir -p "$PREFIX/bin"
-ln -sf "$DEST/scripts/fortify.sh" "$PREFIX/bin/fortify"
+# Optional: include README and LICENSE if present
+[[ -f "$ROOT_DIR/README.md" ]]  && cp -a "$ROOT_DIR/README.md"  "$STAGE/README.md"
+[[ -f "$ROOT_DIR/LICENSE" ]]    && cp -a "$ROOT_DIR/LICENSE"    "$STAGE/LICENSE"
 
-echo "[✓] Installed."
-echo
-echo "Run:"
-echo "  sudo -E fortify -v --open"
-echo "  # or with the server profile"
-echo "  sudo -E fortify -v --open -p $DEST/scripts/profiles/server.profile"
-EOS
-chmod +x "$DIST/$NAME/install.sh"
+# Add a version marker inside tarball
+echo "$VERSION" > "$STAGE/VERSION.txt"
 
-# archives
+# Normalize permissions
+chmod 755 "$STAGE/install.sh" "$STAGE/scripts/fortify.sh" "$STAGE/scripts/bin/fortify" 2>/dev/null || true
+chmod 644 "$STAGE/scripts/checks/"*.sh 2>/dev/null || true
+chmod 644 "$STAGE/scripts/lib/"*.sh    2>/dev/null || true
+chmod 644 "$STAGE/scripts/profiles/"*.profile
+chmod 644 "$STAGE/scripts/gamified_reports.sh"
+
+# Build tar.gz
 (
-  cd "$DIST"
-  tar czf "${NAME}.tar.gz" "$NAME"
-  zip -qr "${NAME}.zip" "$NAME"
+  cd "$PKGROOT"
+  tar -czf "${APPNAME}-${VERSION}.tar.gz" "${APPNAME}-${VERSION}"
 )
 
-# checksums
-(
-  cd "$DIST"
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "${NAME}.tar.gz" "${NAME}.zip" > "SHA256SUMS.txt"
-  else
-    shasum -a 256 "${NAME}.tar.gz" "${NAME}.zip" > "SHA256SUMS.txt"
-  fi
-)
-
-echo
-echo "[✓] Built artifacts:"
-ls -lh "$DIST"
+echo "✓ Built: $PKGROOT/${APPNAME}-${VERSION}.tar.gz"
