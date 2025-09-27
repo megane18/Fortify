@@ -1,66 +1,53 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build a portable tarball:
-#  - bundles scripts/{fortify.sh,bin/fortify,checks,lib,profiles,gamified_reports.sh}
-#  - adds install.sh
-#  - writes VERSION.txt into the root of the archive for reference
+# Resolve version
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-REL_DIR="$ROOT_DIR/scripts/release"
-
-# Version resolution
-VERSION_FILE="$REL_DIR/VERSION"
-if [[ -f "$VERSION_FILE" ]]; then
-  VERSION="$(tr -d ' \t\r\n' < "$VERSION_FILE")"
-else
-  # fallback to latest Git tag (like v0.3.0) or "0.0.0"
-  VERSION="$(git -C "$ROOT_DIR" describe --tags --abbrev=0 2>/dev/null || echo v0.0.0)"
-  VERSION="${VERSION#v}"
+VERSION="${VERSION:-}"
+if [[ -z "${VERSION}" ]]; then
+  if [[ -f "$SCRIPT_DIR/VERSION" ]]; then
+    VERSION="$(tr -d '\n\r ' < "$SCRIPT_DIR/VERSION")"
+  else
+    echo "ERROR: VERSION not set and scripts/release/VERSION not found" >&2
+    exit 1
+  fi
 fi
 
-APPNAME="fortify"
-PKGROOT="$ROOT_DIR/dist"
-STAGE="$PKGROOT/${APPNAME}-${VERSION}"
+echo "Packaging Fortify ${VERSION}"
 
-# Clean stage
-rm -rf "$STAGE" "$PKGROOT"/*.tar.gz
-mkdir -p "$STAGE/scripts/bin"
-mkdir -p "$STAGE/scripts/checks"
-mkdir -p "$STAGE/scripts/lib"
-mkdir -p "$STAGE/scripts/profiles"
+# Staging dirs
+DIST_DIR="$REPO_ROOT/dist"
+STAGE_DIR="$DIST_DIR/fortify-${VERSION}"
+rm -rf "$STAGE_DIR" "$DIST_DIR/fortify-${VERSION}.tar.gz"
+mkdir -p "$STAGE_DIR"
 
-# Copy core files
-cp -a "$ROOT_DIR/scripts/fortify.sh"            "$STAGE/scripts/fortify.sh"
-cp -a "$ROOT_DIR/scripts/bin/fortify"           "$STAGE/scripts/bin/fortify"
-cp -a "$ROOT_DIR/scripts/gamified_reports.sh"   "$STAGE/scripts/gamified_reports.sh"
+# Ensure executables in repo (so tar preserves +x)
+chmod +x "$REPO_ROOT/scripts/fortify.sh" || true
+chmod +x "$REPO_ROOT/scripts/gamified_reports.sh" || true
+chmod +x "$REPO_ROOT/scripts/release/install.sh" || true
+# checks can be empty; make any present executable
+if compgen -G "$REPO_ROOT/scripts/checks/*.sh" > /dev/null; then
+  chmod +x "$REPO_ROOT/scripts/checks/"*.sh || true
+fi
 
-# Copy checks/lib/profiles (these are REQUIRED at runtime)
-cp -a "$ROOT_DIR/scripts/checks/"*.sh           "$STAGE/scripts/checks/"  2>/dev/null || true
-cp -a "$ROOT_DIR/scripts/lib/"*.sh              "$STAGE/scripts/lib/"     2>/dev/null || true
-cp -a "$ROOT_DIR/scripts/profiles/"*.profile    "$STAGE/scripts/profiles/"
+# Copy files into stage
+install -d "$STAGE_DIR/scripts"
+cp -R "$REPO_ROOT/scripts/"* "$STAGE_DIR/scripts/"
 
-# Copy installer
-cp -a "$REL_DIR/install.sh"                     "$STAGE/install.sh"
+# Include top-level helpful files if present
+for f in README.md LICENSE; do
+  [[ -f "$REPO_ROOT/$f" ]] && cp "$REPO_ROOT/$f" "$STAGE_DIR/"
+done
 
-# Optional: include README and LICENSE if present
-[[ -f "$ROOT_DIR/README.md" ]]  && cp -a "$ROOT_DIR/README.md"  "$STAGE/README.md"
-[[ -f "$ROOT_DIR/LICENSE" ]]    && cp -a "$ROOT_DIR/LICENSE"    "$STAGE/LICENSE"
+# (Do NOT copy a bin/fortify here; install.sh will create /usr/local/bin/fortify)
 
-# Add a version marker inside tarball
-echo "$VERSION" > "$STAGE/VERSION.txt"
-
-# Normalize permissions
-chmod 755 "$STAGE/install.sh" "$STAGE/scripts/fortify.sh" "$STAGE/scripts/bin/fortify" 2>/dev/null || true
-chmod 644 "$STAGE/scripts/checks/"*.sh 2>/dev/null || true
-chmod 644 "$STAGE/scripts/lib/"*.sh    2>/dev/null || true
-chmod 644 "$STAGE/scripts/profiles/"*.profile
-chmod 644 "$STAGE/scripts/gamified_reports.sh"
-
-# Build tar.gz
+# Tar it up
 (
-  cd "$PKGROOT"
-  tar -czf "${APPNAME}-${VERSION}.tar.gz" "${APPNAME}-${VERSION}"
+  cd "$DIST_DIR"
+  tar -czf "fortify-${VERSION}.tar.gz" "fortify-${VERSION}"
 )
 
-echo "✓ Built: $PKGROOT/${APPNAME}-${VERSION}.tar.gz"
+echo "Artifacts:"
+ls -la "$DIST_DIR"
